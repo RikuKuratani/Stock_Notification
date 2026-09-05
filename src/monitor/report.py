@@ -13,29 +13,43 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-
-matplotlib.use("Agg")  # ヘッドレス環境（GitHub Actions）で描画する
-import matplotlib.dates as mdates  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-
-# 商品名に日本語が混ざっても豆腐にならないよう、CJKフォントがあれば使う。
-# GitHub Actions の ubuntu-latest には無いので、最後は DejaVu Sans に落ちる。
-plt.rcParams["font.sans-serif"] = [
-    "Hiragino Sans",
-    "Noto Sans CJK JP",
-    "IPAexGothic",
-    "DejaVu Sans",
-]
-plt.rcParams["axes.unicode_minus"] = False
-
-from .config import ReportConfig  # noqa: E402
-from .events import EVENT_LABELS  # noqa: E402
-from .models import slugify  # noqa: E402
-from .notify import format_price  # noqa: E402
-from .state import StateStore, parse_iso  # noqa: E402
+from .config import ReportConfig
+from .events import EVENT_LABELS
+from .models import slugify
+from .notify import format_price
+from .state import StateStore, parse_iso
 
 log = logging.getLogger(__name__)
+
+_plotting: tuple[Any, Any] | None = None
+
+
+def _pyplot() -> tuple[Any, Any]:
+    """matplotlib はグラフを描くときだけ読み込む.
+
+    通知だけを行う実行（notify-test など）で重い描画ライブラリを要求しないため。
+    以前はモジュール先頭で読み込んでいたため、matplotlib が入っていない環境では
+    Slackのテスト送信すら起動できなかった。
+    """
+    global _plotting
+    if _plotting is None:
+        import matplotlib
+
+        matplotlib.use("Agg")  # ヘッドレス環境（GitHub Actions）で描画する
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+
+        # 商品名に日本語が混ざっても豆腐にならないよう、CJKフォントがあれば使う。
+        # GitHub Actions の ubuntu-latest には無いので、最後は DejaVu Sans に落ちる。
+        plt.rcParams["font.sans-serif"] = [
+            "Hiragino Sans",
+            "Noto Sans CJK JP",
+            "IPAexGothic",
+            "DejaVu Sans",
+        ]
+        plt.rcParams["axes.unicode_minus"] = False
+        _plotting = (plt, mdates)
+    return _plotting
 
 _INK = "#1c1c1c"
 _ACCENT = "#c2410c"
@@ -127,6 +141,7 @@ class ReportBuilder:
         xs = [p[0] for p in points]
         ys = [float(p[1]) for p in points]
 
+        plt, mdates = _pyplot()
         target.parent.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(7.2, 3.2), dpi=110)
         ax.step(xs, ys, where="post", color=_ACCENT, linewidth=2, marker="o", markersize=4)

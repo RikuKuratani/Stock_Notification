@@ -13,7 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install requests PyYAML
+      # 診断用のワークフローなので、依存関係は本番と同じものを入れて確実に動かす
+      - run: pip install -r requirements.txt
       - name: テストメッセージを送信
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

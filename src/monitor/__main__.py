@@ -147,6 +147,8 @@ def cmd_notify_test(args: argparse.Namespace) -> int:
         "no_service": "URL が間違っているか、Webhook が削除されています。",
         "channel_not_found": "通知先チャンネルが存在しません（削除・改名されていませんか）。",
         "no_text": "送信内容が空でした（バグの可能性があります）。",
+        "no_team": "URL のワークスペース部分が不正です。Slack Appで発行したURLを、"
+                   "末尾まで省略せずに登録し直してください。",
     }
     hint = hints.get(resp.text.strip())
     if hint:
