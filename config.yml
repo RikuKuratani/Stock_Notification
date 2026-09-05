@@ -44,7 +44,7 @@ report:
   # Pages の公開URL。Slack通知にグラフ画像を添付するために必要。
   # 例: https://<ユーザー名>.github.io/<リポジトリ名>
   # 未設定でも動作するが、Slack通知にグラフ画像は付かない。
-  base_url: ""
+  base_url: "https://rikukuratani.github.io/Stock_Notification/"
   # 生成するグラフの上限（リポジトリ肥大化の防止）
   max_charts: 300
   # ダッシュボードに載せる最近のイベント件数
