@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.DS_Store
+# ローカル実行時のキャッシュ（state/ と docs/ は意図的にコミットする）
+.cache/
+.ruff_cache/

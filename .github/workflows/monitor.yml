@@ -1,0 +1,72 @@
+name: 入荷監視
+
+on:
+  schedule:
+    # 1時間ごと（UTC基準。GitHub Actions のスケジュールは数分ずれることがある）
+    - cron: '0 * * * *'
+  # 動作確認用の手動トリガー（仕様書 4.1）
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Slackに送らずログ出力だけにする'
+        type: boolean
+        default: false
+      shop:
+        description: '特定のショップIDだけ実行する（空なら全ショップ）'
+        type: string
+        default: ''
+
+# 前の実行が終わる前に次が始まると state.json の push が衝突するため直列化する
+concurrency:
+  group: ourlegacy-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存関係をインストール
+        run: pip install -r requirements.txt
+
+      - name: 監視を実行
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_ERROR_WEBHOOK_URL: ${{ secrets.SLACK_ERROR_WEBHOOK_URL }}
+          SCRAPER_PROXY_API_KEY: ${{ secrets.SCRAPER_PROXY_API_KEY }}
+          PYTHONPATH: src
+        run: |
+          python -m monitor run \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            ${{ inputs.shop && format('--shop {0}', inputs.shop) || '' }}
+
+      - name: state とダッシュボードをコミット
+        # 監視が失敗しても、途中まで更新した state は残す
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state docs
+          if git diff --cached --quiet; then
+            echo "変更なし"
+            exit 0
+          fi
+          git commit -m "chore: 監視結果を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          # 実行が重なった場合に備えてリベースしてから push する
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            echo "push に失敗しました。リトライ ${attempt}/3"
+            sleep 5
+          done
+          exit 1

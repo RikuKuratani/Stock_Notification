@@ -1,0 +1,127 @@
+# OurLegacy 入荷監視システム 設定ファイル
+# 仕様書 ourlegacy_monitor_spec.md v0.2 に対応
+
+brand: "Our Legacy"
+
+# ------------------------------------------------------------------
+# 共通のHTTP設定（非機能要件1: アクセス頻度への遠慮）
+# ------------------------------------------------------------------
+http:
+  # 同一ショップへの連続リクエストの最小間隔（秒）
+  min_interval_seconds: 1.5
+  timeout_seconds: 30
+  max_retries: 2
+  # 実ブラウザに近いUAを名乗る（過度な偽装はしない / 仕様書 非機能要件1）
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+  # robots.txt を取得して Disallow のURLはスキップする（非機能要件2）
+  respect_robots_txt: true
+
+# ------------------------------------------------------------------
+# 通知設定
+# ------------------------------------------------------------------
+notify:
+  # 同一商品・同一イベント種別を再通知しないクールダウン（時間）
+  cooldown_hours: 24
+  # 1回の実行で送るメッセージの上限（暴発防止のセーフティ）
+  max_messages_per_run: 30
+  # 初回実行（そのショップの state が空）のときは個別通知せずサマリのみ送る
+  bootstrap_summary_only: true
+  # 通知するイベント種別
+  events:
+    new_arrival: true      # 新規入荷
+    restock: true          # 再入荷（サイズ復活を含む）
+    lowest_price: true     # 過去最安値の更新
+
+# ------------------------------------------------------------------
+# 価格推移グラフ / GitHub Pages（仕様書 4.6）
+# ------------------------------------------------------------------
+report:
+  enabled: true
+  output_dir: "docs"
+  # Pages の公開URL。Slack通知にグラフ画像を添付するために必要。
+  # 例: https://<ユーザー名>.github.io/<リポジトリ名>
+  # 未設定でも動作するが、Slack通知にグラフ画像は付かない。
+  base_url: ""
+  # 生成するグラフの上限（リポジトリ肥大化の防止）
+  max_charts: 300
+  # ダッシュボードに載せる最近のイベント件数
+  recent_events: 100
+
+# ------------------------------------------------------------------
+# 監視対象ショップ
+# ------------------------------------------------------------------
+shops:
+
+  # --- 検証済み: 素のHTTPリクエストで取得可能 ---------------------
+  - id: ourlegacy
+    name: "Our Legacy 公式"
+    scraper: ourlegacy
+    enabled: true
+    options:
+      # sitemap から全商品URLを列挙し、予算内で商品ページを巡回する。
+      # 全商品数は約2,500件あるため、1回の実行で見る件数に上限を設ける。
+      sitemap_index_url: "https://www.ourlegacy.com/sitemap/sitemap.xml"
+      # 1回の実行で商品ページを取得する最大件数
+      #   未取得の新商品 → ウォッチリスト → 最終確認が古い順 の優先度で消化する
+      max_product_fetches: 150
+      # 通貨（公式サイトのデフォルトロケールは EUR 表示）
+      currency: "EUR"
+      # 優先的に毎回チェックしたい商品（商品URL/商品名の部分一致・小文字比較）
+      watchlist: []
+        # - "camion"
+        # - "borrowed shirt"
+
+  - id: endclothing
+    name: "END. Clothing"
+    scraper: endclothing
+    enabled: true
+    options:
+      # ブランド一覧ページのSSR（Algolia）結果を読む。1リクエストで最大120件。
+      listing_urls:
+        - "https://www.endclothing.com/gb/brands/our-legacy"
+      # 表示ストア。gb ストアの価格は final_price_1 に入る
+      price_field: "final_price_1"
+      currency: "GBP"
+
+  # --- 未検証: 現状403。プロキシ経由 or Playwright が必要（フェーズ3） ---
+  # scraping.proxy を設定して enabled: true にすると有効になる。
+  - id: ssense
+    name: "SSENSE"
+    scraper: ssense
+    enabled: false
+    options:
+      listing_urls:
+        - "https://www.ssense.com/en-us/men/designers/our-legacy"
+      currency: "USD"
+
+  - id: farfetch
+    name: "Farfetch"
+    scraper: farfetch
+    enabled: false
+    options:
+      listing_urls:
+        - "https://www.farfetch.com/shopping/men/our-legacy/items.aspx"
+      currency: "USD"
+
+  - id: mrporter
+    name: "MR PORTER"
+    scraper: mrporter
+    enabled: false
+    options:
+      listing_urls:
+        - "https://www.mrporter.com/en-us/mens/designer/our-legacy"
+      currency: "USD"
+
+# ------------------------------------------------------------------
+# スクレイピング代行サービス（仕様書 4.3 / フェーズ3）
+# 環境変数 SCRAPER_PROXY_API_KEY が設定されている場合のみ有効になる。
+# ------------------------------------------------------------------
+scraping:
+  proxy:
+    enabled: false
+    # URLテンプレート。{key} と {url}（URLエンコード済み）が置換される。
+    # ScraperAPI  : "https://api.scraperapi.com/?api_key={key}&url={url}&render=true"
+    # ZenRows     : "https://api.zenrows.com/v1/?apikey={key}&url={url}&js_render=true"
+    url_template: "https://api.scraperapi.com/?api_key={key}&url={url}&render=true"
+    # プロキシ経由にするショップID
+    shops: []

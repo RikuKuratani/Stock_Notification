@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o ol_robots.txt -w \"robots:%{http_code}\\\\n\" https://www.ourlegacy.com/robots.txt --max-time 20)"
+    ]
+  }
+}
