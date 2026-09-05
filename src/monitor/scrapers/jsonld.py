@@ -113,6 +113,7 @@ class JsonLdListingScraper(Scraper):
             raise RuntimeError("listing_urls が設定されていません")
         currency = str(self.options.get("currency", ""))
         max_pages = int(self.options.get("max_pages", 5))
+        self.full_coverage = type(self).full_coverage
 
         found: dict[str, Product] = {}
         for url in listing_urls:
@@ -127,7 +128,14 @@ class JsonLdListingScraper(Scraper):
                 except Exception as exc:  # noqa: BLE001 - 2ページ目以降の失敗は打ち切り
                     if page == 1:
                         raise
-                    self.warn(f"{page_url}: {page}ページ目の取得に失敗 ({exc})")
+                    # 途中で諦めた以上、その先に何があるかは分からない。
+                    # full_coverage を下ろさないと、見えなかった商品を
+                    # 完売と誤判定してしまう。
+                    self.full_coverage = False
+                    self.warn(
+                        f"{page_url}: {page}ページ目の取得に失敗したため打ち切りました "
+                        f"（{exc}）。完売の判定は行いません"
+                    )
                     break
 
                 before = len(found)
@@ -142,10 +150,15 @@ class JsonLdListingScraper(Scraper):
                 else:
                     barren_pages = 0
             else:
-                # ループを最後まで使い切った = まだ先のページがあるかもしれない
+                # ループを最後まで使い切った = まだ先のページがあるかもしれない。
+                # 全件を見きれていないので「一覧に無い商品＝完売」とは判断できない。
+                # ここで full_coverage を下ろさないと、ページの並びが変わるたびに
+                # 見えなくなった商品を完売→再入荷と誤検知して通知が溢れる。
+                self.full_coverage = False
                 self.warn(
                     f"{url}: {max_pages}ページ分（{len(found)}件）で打ち切りました。"
-                    "取りこぼしが疑われる場合は max_pages を増やしてください"
+                    "全件を見きれていないため、完売の判定は行いません"
+                    "（取りこぼしが気になる場合は max_pages を増やしてください）"
                 )
 
         if not found:

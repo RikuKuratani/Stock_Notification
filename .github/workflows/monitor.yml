@@ -27,7 +27,8 @@ permissions:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Farfetch のレート制限待ちで長引くことがある。公開リポジトリなら実行時間は無料。
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4

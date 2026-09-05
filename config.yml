@@ -113,7 +113,10 @@ shops:
       min_interval_seconds: 8.0
       listing_urls:
         - "https://www.farfetch.com/shopping/men/our-legacy/items.aspx"
-      max_pages: 4          # 1ページ96件 = 最大384件
+      # 実測: 全424件・7ページ。9まで見て終端（新規なしが2回）を確認する。
+      # 上限で打ち切ると全件を見きれず、完売の判定を自動的に見送るため
+      # 通知は出るが「売り切れ→再入荷」は拾えなくなる。
+      max_pages: 9
       currency: "JPY"       # 日本からのアクセスは JPY 表示になる
 
   # --- 未対応: 偽装しても JavaScript チャレンジが返る（フェーズ3） ---

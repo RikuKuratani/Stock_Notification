@@ -205,7 +205,7 @@ class StateStore:
             if not bootstrap:
                 events.extend(product_events)
 
-        if result.full_coverage:
+        if result.full_coverage and self._harvest_looks_complete(result, len(seen_keys)):
             # 一覧から消えた商品は取り扱い終了/完売とみなす。
             # 「在庫あり」のまま残すと、次に現れたときに再入荷を取りこぼす。
             for key, entry in products.items():
@@ -220,6 +220,31 @@ class StateStore:
 
         self.dirty = True
         return events
+
+    #: 前回より取得数がこの割合を下回ったら、取得が不完全だったとみなす
+    HARVEST_FLOOR = 0.8
+
+    def _harvest_looks_complete(self, result: ScrapeResult, fetched: int) -> bool:
+        """今回の取得が「その店の全在庫」と呼べる量かどうか.
+
+        ページ送りの失敗などで一部しか取れなかった回に完売判定をすると、
+        次の回で戻ってきた商品がまとめて再入荷として通知されてしまう。
+        前回の8割を下回ったら不完全とみなし、完売判定を見送る。
+        """
+        previous = int(self.shop_meta(result.shop_id).get("product_count", 0) or 0)
+        if previous <= 0:
+            return True
+        if fetched >= previous * self.HARVEST_FLOOR:
+            return True
+        log.warning(
+            "[%s] 取得数が前回より大きく減りました（%d → %d）。"
+            "取得もれの可能性があるため、完売の判定は見送ります",
+            result.shop_id, previous, fetched,
+        )
+        result.warnings.append(
+            f"取得数が前回より大きく減りました（{previous} → {fetched}件）。完売判定を見送りました"
+        )
+        return False
 
     def _merge(
         self,

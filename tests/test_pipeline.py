@@ -511,3 +511,27 @@ def test_migration_reruns_bootstrap_only_for_partial_coverage_shops(tmp_path):
 
     assert state.bootstrap_complete("endclothing", full_coverage=True) is True
     assert state.bootstrap_complete("ourlegacy", full_coverage=False) is False
+
+
+def test_cli_does_not_require_matplotlib_at_import_time():
+    """通知だけの実行で描画ライブラリを要求しないこと.
+
+    以前は report.py がモジュール先頭で matplotlib を読み込んでいたため、
+    matplotlib の無い環境では `notify-test` すら起動できなかった。
+    """
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    code = (
+        "import sys, monitor.__main__;"
+        "print('matplotlib' in sys.modules)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env={"PYTHONPATH": str(src), "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, timeout=90,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False", "CLIの起動時に matplotlib が読み込まれています"

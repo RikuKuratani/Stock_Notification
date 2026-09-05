@@ -261,3 +261,74 @@ def test_farfetch_reads_url_from_offers():
     assert product.in_stock is True
     # 相対URLは一覧URLを基準に絶対化する
     assert product.product_url == "https://www.farfetch.com/jp/shopping/men/our-legacy-boots-item-31083391.aspx"
+
+
+def test_page_budget_exhaustion_drops_full_coverage():
+    """ページ上限で打ち切った回は「全件取得できた」と主張しない.
+
+    全件を見きれていないのに一覧から消えた商品を完売扱いすると、ページの
+    並びが変わるたびに完売→再入荷の誤通知が出る。
+    """
+    from monitor.scrapers.blocked_sites import FarfetchScraper
+
+    pages = {"https://f/x": JSONLD_HTML}
+    for n in (2, 3):
+        pages[f"https://f/x?page={n}"] = JSONLD_HTML.replace("1234", f"{n}99").replace("8765", f"{n}88")
+    shop = ShopConfig(id="farfetch", name="Farfetch", scraper="farfetch",
+                      options={"listing_urls": ["https://f/x"], "max_pages": 3})
+    result = FarfetchScraper(shop, FakeSession(pages)).run()
+
+    assert result.full_coverage is False
+    assert any("完売の判定は行いません" in w for w in result.warnings)
+
+
+def test_early_stop_keeps_full_coverage():
+    """最終ページまで辿り着けた回は、これまでどおり完売判定を行う."""
+    from monitor.scrapers.blocked_sites import SsenseScraper
+
+    pages = {"https://s/x": JSONLD_HTML}
+    for n in (2, 3):
+        pages[f"https://s/x?page={n}"] = JSONLD_HTML   # 新規なしが2回続く
+    shop = ShopConfig(id="ssense", name="SSENSE", scraper="ssense",
+                      options={"listing_urls": ["https://s/x"], "max_pages": 6})
+    result = SsenseScraper(shop, FakeSession(pages)).run()
+
+    assert result.full_coverage is True
+    assert result.warnings == []
+
+
+def test_failed_page_mid_pagination_drops_full_coverage():
+    """途中のページが取れなかった回も「全件取得できた」と主張しない."""
+    from monitor.scrapers.blocked_sites import FarfetchScraper
+
+    class FlakySession(FakeSession):
+        def get_text(self, url, **kwargs):
+            if "page=3" in url:
+                raise RuntimeError("HTTP 429")
+            return super().get_text(url, **kwargs)
+
+    page2 = (JSONLD_HTML.replace("12345678", "22222222")
+                        .replace("87654321", "33333333")
+                        .replace("OL-CAMION", "OL-PAGE2"))
+    pages = {"https://f/x": JSONLD_HTML, "https://f/x?page=2": page2}
+    shop = ShopConfig(id="farfetch", name="Farfetch", scraper="farfetch",
+                      options={"listing_urls": ["https://f/x"], "max_pages": 6})
+    result = FarfetchScraper(shop, FlakySession(pages)).run()
+
+    assert result.full_coverage is False
+    assert len(result.products) == 4       # 取れた2ページ分は活かす
+    assert any("完売の判定は行いません" in w for w in result.warnings)
+
+
+def test_first_page_failure_still_raises():
+    """1ページ目から取れないのは本物の障害なので、失敗として扱う."""
+    from monitor.scrapers.blocked_sites import FarfetchScraper
+
+    class DeadSession(FakeSession):
+        def get_text(self, url, **kwargs):
+            raise RuntimeError("HTTP 403")
+
+    shop = ShopConfig(id="farfetch", name="Farfetch", scraper="farfetch",
+                      options={"listing_urls": ["https://f/x"]})
+    with pytest.raises(RuntimeError, match="403"):
+        FarfetchScraper(shop, DeadSession({})).run()
