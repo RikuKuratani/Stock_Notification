@@ -1,0 +1,21 @@
+name: Slack疎通テスト
+
+# Slackに通知が届かないときの切り分け用。
+# Actions タブから手動で実行すると、テストメッセージを1件だけ送る。
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests PyYAML
+      - name: テストメッセージを送信
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PYTHONPATH: src
+        run: python -m monitor notify-test

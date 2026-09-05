@@ -135,11 +135,31 @@ class SlackNotifier:
         return {"text": f"{headline}: {product.product_name} / {price_text}", "blocks": blocks}
 
     # ------------------------------------------------------------------
-    def notify_bootstrap(self, shop_name: str, product_count: int) -> bool:
-        text = (
-            f":inbox_tray: *{shop_name}* の初回スキャンが完了しました "
-            f"（{product_count}件を登録）。次回以降、差分だけを通知します。"
-        )
+    def notify_bootstrap(
+        self,
+        shop_name: str,
+        registered: int,
+        catalog_size: int | None = None,
+        finished: bool = True,
+    ) -> bool:
+        """初回スキャンの進捗を伝える.
+
+        公式サイトのように一巡に何回もかかるショップでは、終わるまで進捗を出す。
+        一巡が終わるまでは「未知の商品＝未巡回」なので差分通知は始まらない。
+        """
+        if finished:
+            text = (
+                f":inbox_tray: *{shop_name}* の初回スキャンが完了しました "
+                f"（{registered:,}件を登録）。次回以降、差分だけを通知します。"
+            )
+        else:
+            total = f"{catalog_size:,}" if catalog_size else "?"
+            percent = f"{registered / catalog_size * 100:.0f}%" if catalog_size else "?"
+            text = (
+                f":hourglass_flowing_sand: *{shop_name}* の初回スキャン中です "
+                f"（{registered:,} / {total}件・{percent}）。"
+                "全商品を一巡するまで、差分通知は始まりません。"
+            )
         return self._post({"text": text}, self.webhook_url)
 
     def notify_failures(self, failures: Sequence[ShopFailure]) -> bool:

@@ -46,6 +46,7 @@ class OurLegacyScraper(Scraper):
         if not urls:
             raise RuntimeError("sitemap から商品URLを1件も取得できませんでした")
 
+        self.catalog_size = len(urls)
         ordered = self._prioritise(urls, watchlist)
         products: list[Product] = []
         failures = 0

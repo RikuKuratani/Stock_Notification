@@ -173,7 +173,7 @@ def test_runner_caps_messages_per_run(monkeypatch, tmp_path):
         monkeypatch, tmp_path, StubScraper(products),
         notify_config=NotifyConfig(max_messages_per_run=3, bootstrap_summary_only=False),
     )
-    state.data["products"]["shop:seed"] = {"shop_id": "shop"}  # 初回扱いを避ける
+    state.shop_meta("shop")["bootstrap_complete"] = True  # 初回スキャンは済んでいる扱い
 
     summary = runner.run()
     assert summary.events_detected == 10
@@ -189,6 +189,7 @@ def test_runner_prioritises_lowest_price_over_new_arrival(monkeypatch, tmp_path)
         notify_config=NotifyConfig(max_messages_per_run=1, bootstrap_summary_only=False),
     )
     # cheap は既知で高値、fresh は未知
+    state.shop_meta("shop")["bootstrap_complete"] = True
     state.data["products"]["shop:cheap"] = {
         "shop_id": "shop", "in_stock": True, "sizes_in_stock": ["46"],
         "price": 999.0, "currency": "EUR", "lowest_price_ever": 999.0,
@@ -421,3 +422,92 @@ def test_robots_txt_blocks_disallowed_url():
     with pytest.raises(BlockedByRobotsError):
         session.get("https://x/secret/page")
     assert session.allowed("https://x/public/page") is True
+
+
+# ----------------------------------------------------------------------
+# 初回スキャン（一巡し終わるまで新規入荷として通知しない）
+# ----------------------------------------------------------------------
+class PartialScraper(StubScraper):
+    """公式サイトのように、毎回カタログの一部しか返さないスクレイパー."""
+
+    def __init__(self, batches, catalog_size):
+        super().__init__([], full_coverage=False)
+        self.batches = list(batches)
+        self.catalog_size = catalog_size
+
+    def run(self):
+        products = self.batches.pop(0) if self.batches else []
+        return ScrapeResult("shop", products, full_coverage=False,
+                            catalog_size=self.catalog_size)
+
+
+def test_partial_shop_stays_silent_until_the_catalog_is_covered(monkeypatch, tmp_path):
+    """一巡し終わるまでは、未知の商品＝未巡回なので通知しない."""
+    batch1 = [make_product(product_id=f"a{i}") for i in range(2)]
+    batch2 = [make_product(product_id=f"b{i}") for i in range(2)]
+    batch3 = [make_product(product_id="new-one", product_name="Borrowed Shirt")]
+    scraper = PartialScraper([batch1, batch2, batch3], catalog_size=4)
+    runner, state, notifier = build_runner(monkeypatch, tmp_path, scraper)
+
+    # 1回目: 2/4件 -> 進捗を伝えるのみ
+    assert runner.run().events_detected == 0
+    assert "初回スキャン中" in notifier.payloads[-1]["text"]
+    assert state.bootstrap_complete("shop") is False
+
+    # 2回目: 4/4件 -> 一巡完了
+    assert runner.run().events_detected == 0
+    assert "初回スキャンが完了" in notifier.payloads[-1]["text"]
+    assert state.bootstrap_complete("shop") is True
+
+    # 3回目: ここで初めて新規入荷として通知される
+    summary = runner.run()
+    assert summary.events_detected == 1
+    assert "Borrowed Shirt" in json.dumps(notifier.payloads[-1], ensure_ascii=False)
+
+
+def test_bootstrap_complete_is_not_undone_when_the_catalog_grows(monkeypatch, tmp_path):
+    """取扱商品が増えても初回スキャン扱いに戻さない（本物の新規入荷を落とさない）."""
+    scraper = PartialScraper([[make_product(product_id="a")]], catalog_size=1)
+    runner, state, notifier = build_runner(monkeypatch, tmp_path, scraper)
+    runner.run()
+    assert state.bootstrap_complete("shop") is True
+
+    scraper.batches = [[make_product(product_id="a"), make_product(product_id="b")]]
+    scraper.catalog_size = 50          # カタログが急に増えた
+    assert runner.run().events_detected == 1
+    assert state.bootstrap_complete("shop") is True
+
+
+def test_full_coverage_shop_finishes_bootstrap_in_one_run(monkeypatch, tmp_path):
+    scraper = StubScraper([make_product()])
+    runner, state, notifier = build_runner(monkeypatch, tmp_path, scraper)
+    runner.run()
+    assert state.bootstrap_complete("shop") is True
+    assert "初回スキャンが完了" in notifier.payloads[-1]["text"]
+
+
+def test_existing_state_from_older_version_is_treated_as_bootstrapped(monkeypatch, tmp_path):
+    """bootstrap_complete を持たない旧stateから移行しても通知を落とさない."""
+    scraper = StubScraper([make_product(), make_product(product_id="p2")])
+    runner, state, notifier = build_runner(monkeypatch, tmp_path, scraper)
+    # 旧バージョンが書いた state を模す
+    state.data["products"]["shop:p1"] = {
+        "shop_id": "shop", "in_stock": True, "sizes_in_stock": ["46"],
+        "price": 100.0, "currency": "EUR", "lowest_price_ever": 100.0,
+    }
+    state.shop_meta("shop").update(bootstrapped=True, product_count=1)
+    state.shop_meta("shop").pop("bootstrap_complete", None)
+
+    assert state.bootstrap_complete("shop") is True
+    assert runner.run().events_detected == 1     # p2 は本物の新規入荷
+
+
+def test_migration_reruns_bootstrap_only_for_partial_coverage_shops(tmp_path):
+    """旧stateからの移行: 全件取得ショップは完了扱い、一部巡回ショップはやり直す."""
+    state = StateStore(tmp_path / "state.json")
+    for shop_id in ("endclothing", "ourlegacy"):
+        state.shop_meta(shop_id).update(bootstrapped=True, product_count=10)
+        state.shop_meta(shop_id).pop("bootstrap_complete", None)
+
+    assert state.bootstrap_complete("endclothing", full_coverage=True) is True
+    assert state.bootstrap_complete("ourlegacy", full_coverage=False) is False

@@ -40,16 +40,39 @@ jobs:
       - name: 依存関係をインストール
         run: pip install -r requirements.txt
 
+      - name: 設定を確認
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            echo "✅ SLACK_WEBHOOK_URL は登録されています（末尾: ...${SLACK_WEBHOOK_URL: -6}）"
+          else
+            echo "::warning::SLACK_WEBHOOK_URL が登録されていません。通知はログ出力のみになります。"
+            echo "   Settings > Secrets and variables > Actions で登録してください。"
+          fi
+
       - name: 監視を実行
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_ERROR_WEBHOOK_URL: ${{ secrets.SLACK_ERROR_WEBHOOK_URL }}
           SCRAPER_PROXY_API_KEY: ${{ secrets.SCRAPER_PROXY_API_KEY }}
           PYTHONPATH: src
+          # 式の結果をシェル変数として受け取る。`${{ inputs.x && 'a' || '' }}` を
+          # コマンドラインに直接埋め込むと、真偽値が文字列 "false" で渡ったときに
+          # シェルでは真と評価され、意図せず --dry-run が付いてしまう。
+          DRY_RUN: ${{ inputs.dry_run }}
+          ONLY_SHOP: ${{ inputs.shop }}
         run: |
-          python -m monitor run \
-            ${{ inputs.dry_run && '--dry-run' || '' }} \
-            ${{ inputs.shop && format('--shop {0}', inputs.shop) || '' }}
+          ARGS=""
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+            echo "::notice::dry-run モードです。Slackには送信しません。"
+          fi
+          if [ -n "$ONLY_SHOP" ]; then
+            ARGS="$ARGS --shop $ONLY_SHOP"
+          fi
+          echo "実行: python -m monitor run$ARGS"
+          python -m monitor run $ARGS
 
       - name: state とダッシュボードをコミット
         # 監視が失敗しても、途中まで更新した state は残す

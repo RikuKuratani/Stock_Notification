@@ -59,6 +59,9 @@ class ScrapeResult:
     full_coverage: bool = True
     #: 実行中に起きた非致命的な問題（ダッシュボードとログに出す）
     warnings: list[str] = field(default_factory=list)
+    #: そのショップの全取扱商品数。予算内で一部しか巡回しないスクレイパーが
+    #: 「初回の一巡が終わったか」を判断するために使う。分からなければ None。
+    catalog_size: int | None = None
 
 
 def slugify(value: str, max_length: int = 60) -> str:

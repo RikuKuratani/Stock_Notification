@@ -4,6 +4,7 @@
     python -m monitor run --dry-run       # Slackに送らずログ出力だけ
     python -m monitor run --shop ourlegacy
     python -m monitor check                # 設定と到達性の確認
+    python -m monitor notify-test          # Slackにテスト通知を1件送る
     python -m monitor report               # stateからグラフとHTMLを作り直す
 """
 
@@ -109,6 +110,50 @@ def cmd_check(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def cmd_notify_test(args: argparse.Namespace) -> int:
+    """Slackへの経路が通っているかだけを確かめる（切り分け用）."""
+    config = load_config(args.config)
+    url = config.slack_webhook_url
+
+    if not url:
+        print("❌ SLACK_WEBHOOK_URL が設定されていません。")
+        print("   ローカル : export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/...'")
+        print("   Actions  : Settings > Secrets and variables > Actions に登録")
+        return 1
+    if not url.startswith("https://hooks.slack.com/"):
+        print(f"❌ Webhook URL の形式が不正です: {url[:40]}...")
+        print("   'https://hooks.slack.com/services/...' の形式である必要があります。")
+        return 1
+
+    print(f"Webhook URL: https://hooks.slack.com/services/…{url[-6:]}")
+
+    import requests
+
+    payload = {"text": ":white_check_mark: Our Legacy 入荷監視システムからのテスト通知です。"
+                       "これが見えていれば、通知の経路は正常です。"}
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+    except requests.RequestException as exc:
+        print(f"❌ 送信に失敗しました: {exc}")
+        return 1
+
+    if resp.status_code == 200 and resp.text.strip() == "ok":
+        print("✅ 送信しました。Slackのチャンネルを確認してください。")
+        return 0
+
+    print(f"❌ Slack がエラーを返しました: HTTP {resp.status_code} / {resp.text[:200]}")
+    hints = {
+        "invalid_token": "Webhook が無効化されています。Slack Appで再発行してください。",
+        "no_service": "URL が間違っているか、Webhook が削除されています。",
+        "channel_not_found": "通知先チャンネルが存在しません（削除・改名されていませんか）。",
+        "no_text": "送信内容が空でした（バグの可能性があります）。",
+    }
+    hint = hints.get(resp.text.strip())
+    if hint:
+        print(f"   → {hint}")
+    return 1
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     state = StateStore(args.state).load()
@@ -138,6 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("check", help="設定を確認する")
     check.add_argument("--probe", action="store_true", help="各ショップへ1回だけ実アクセスする")
     check.set_defaults(func=cmd_check)
+
+    notify_test = sub.add_parser("notify-test", help="Slackにテスト通知を1件送る")
+    notify_test.set_defaults(func=cmd_notify_test)
 
     report = sub.add_parser("report", help="stateからグラフとダッシュボードを作り直す")
     report.add_argument("--no-save", action="store_true")

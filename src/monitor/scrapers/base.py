@@ -42,6 +42,8 @@ class Scraper(ABC):
         #: product_id -> 最終確認時刻(ISO)。巡回順の決定に使う。
         self.known_last_checked = known_last_checked or {}
         self.warnings: list[str] = []
+        #: 全取扱商品数（分かる場合のみ設定する）
+        self.catalog_size: int | None = None
 
     @property
     def shop_id(self) -> str:
@@ -58,6 +60,7 @@ class Scraper(ABC):
             products=products,
             full_coverage=self.full_coverage,
             warnings=list(self.warnings),
+            catalog_size=self.catalog_size if self.catalog_size is not None else len(products),
         )
 
     # -- 便利メソッド --------------------------------------------------

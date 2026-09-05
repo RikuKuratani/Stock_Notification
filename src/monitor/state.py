@@ -103,6 +103,41 @@ class StateStore:
             },
         )
 
+    def bootstrap_complete(self, shop_id: str, full_coverage: bool | None = None) -> bool:
+        """そのショップの全商品を一度は見終わっているか.
+
+        公式サイトのように1回で一部しか巡回しないショップでは、初回の一巡が
+        終わるまで「state に無い商品」は新規入荷ではなく単なる未巡回なので、
+        この判定が False の間は通知を出さない。
+
+        ``full_coverage`` は、このフラグを持たない旧 state から移行するときだけ
+        使う。1回で全件取れるショップなら過去の初回スキャンで一巡が済んでいる
+        ので完了とみなし、一部しか巡回しないショップはやり直す。
+        """
+        meta = self.shop_meta(shop_id)
+        if "bootstrap_complete" in meta:
+            return bool(meta["bootstrap_complete"])
+        if full_coverage is None:
+            full_coverage = bool(meta.get("full_coverage", True))
+        return bool(meta.get("bootstrapped")) and full_coverage
+
+    def mark_bootstrap_complete(
+        self, shop_id: str, known: int, catalog_size: int | None
+    ) -> bool:
+        """一巡が終わっていればフラグを立て、今回終わったかどうかを返す.
+
+        いちど立てたら下ろさない。取扱商品が増えて known < catalog_size に
+        戻ったときに、本物の新規入荷を握りつぶさないようにするため。
+        """
+        meta = self.shop_meta(shop_id)
+        if meta.get("bootstrap_complete"):
+            return False
+        finished = catalog_size is None or known >= catalog_size
+        meta["bootstrap_complete"] = finished
+        meta["catalog_size"] = catalog_size
+        self.dirty = True
+        return finished
+
     def has_products(self, shop_id: str) -> bool:
         prefix = f"{shop_id}:"
         return any(k.startswith(prefix) for k in self.data.get("products", {}))
@@ -111,10 +146,17 @@ class StateStore:
         prefix = f"{shop_id}:"
         return {k: v for k, v in self.data.get("products", {}).items() if k.startswith(prefix)}
 
-    def record_success(self, shop_id: str, product_count: int, bootstrapped: bool) -> None:
+    def record_success(
+        self,
+        shop_id: str,
+        product_count: int,
+        bootstrapped: bool,
+        full_coverage: bool = True,
+    ) -> None:
         meta = self.shop_meta(shop_id)
         stamp = iso(now_jst())
         meta.update(
+            full_coverage=full_coverage,
             last_run_at=stamp,
             last_success_at=stamp,
             last_error=None,

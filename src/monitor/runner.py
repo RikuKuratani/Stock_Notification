@@ -85,9 +85,7 @@ class Runner:
         started = time.monotonic()
         session = build_session(shop.id, self.config, str(shop.options.get("impersonate", "")),
                                 shop.options.get("min_interval_seconds"))
-        bootstrap = not self.state.has_products(shop.id)
-
-        log.info("[%s] 開始%s", shop.id, "（初回スキャン）" if bootstrap else "")
+        log.info("[%s] 開始", shop.id)
         try:
             scraper = build_scraper(shop, session, self.state.last_checked_map(shop.id))
             result = scraper.run()
@@ -107,8 +105,21 @@ class Runner:
             )
             return []
 
+        # 一巡が終わったかどうかは、そのショップが1回で全件を返せるか
+        # （result.full_coverage）に依るため、取得後に判定する。
+        bootstrap = not self.state.bootstrap_complete(shop.id, result.full_coverage)
+
         events = self.state.apply(result, shop.name, bootstrap=bootstrap)
-        self.state.record_success(shop.id, len(result.products), bootstrapped=bootstrap)
+        self.state.record_success(
+            shop.id, len(result.products), bootstrapped=bootstrap,
+            full_coverage=result.full_coverage,
+        )
+        # 全商品を一度は見終わったか判定する。終わるまで「未知の商品」は
+        # 新規入荷ではなく「まだ巡回していなかっただけ」なので通知しない。
+        known = len(self.state.products_for(shop.id))
+        just_finished = bootstrap and self.state.mark_bootstrap_complete(
+            shop.id, known=known, catalog_size=result.catalog_size
+        )
 
         summary.shops_ok += 1
         summary.products_seen += len(result.products)
@@ -125,7 +136,12 @@ class Runner:
         )
 
         if bootstrap and self.config.notify.bootstrap_summary_only:
-            self.notifier.notify_bootstrap(shop.name, len(result.products))
+            self.notifier.notify_bootstrap(
+                shop.name,
+                registered=known,
+                catalog_size=result.catalog_size,
+                finished=just_finished,
+            )
         return events
 
     # ------------------------------------------------------------------

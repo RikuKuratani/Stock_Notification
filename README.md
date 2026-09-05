@@ -111,15 +111,17 @@ gh repo create ourlegacy-monitor --private --source=. --push
 
 | 時期 | やること | 見るところ |
 |---|---|---|
-| 初回実行の直後 | Slackに「初回スキャンが完了しました」が4件（4ショップ分）届くのを確認 | Slackチャンネル |
-| 1〜2時間後 | 2回目以降で差分通知が動き出す。Actionsが緑になっているか確認 | *Actions* タブ |
-| 翌日 | ダッシュボードに各ショップの「最終成功」が並ぶか確認 | GitHub Pages |
+| いちばん最初 | *Actions > Slack疎通テスト > Run workflow* でSlackにテスト通知が届くか確認 | Slackチャンネル |
+| 初回実行の直後 | 「初回スキャンが完了しました」がEND./SSENSE/Farfetchの3件届く | Slackチャンネル |
+| 1〜2時間後 | END./SSENSE/Farfetch の差分通知が動き出す。Actionsが緑か確認 | *Actions* タブ |
+| 翌日 | 公式サイトの初回スキャンが完了し、4ショップすべてが差分通知に入る | Slackチャンネル |
 | 1週間後 | 通知が多すぎ/少なすぎないか調整（`cooldown_hours`、`max_messages_per_run`） | `config.yml` |
 | 随時 | 欲しい商品が決まったら公式サイトの `watchlist` に追加 | `config.yml` |
 
 うまくいかないときの見方:
 
-- **Slackに何も来ない** → *Actions* タブでワークフローが緑か確認。赤ならログの「取得に失敗」を読む。緑なのに来ないなら `SLACK_WEBHOOK_URL` の登録名を確認する
+- **Slackに何も来ない** → *Actions > Slack疎通テスト* を手動実行するのが最短です。ここで届かなければ通知の経路（Webhook登録）の問題、届くなら「通知すべき変化がまだ無い」だけです。ローカルでは `python -m monitor notify-test` で同じ確認ができます
+- **Pagesは更新されるのにSlackだけ来ない** → 実行時に *dry-run* にチェックが入っていないか確認。ログの冒頭に `dry-run モードです` と出ていればそれが原因です
 - **特定のショップだけ失敗し続ける** → ダッシュボードの「連続失敗」欄を見る。サイト改修で構造が変わったか、`impersonate` のプロファイルが効かなくなった可能性
 - **通知が多すぎる** → `notify.cooldown_hours` を伸ばす、`notify.events` で種別を絞る
 - **グラフが出ない** → 価格が2回以上記録されるまでグラフは作られません（変化がなければ記録もされません）。数日待つ
@@ -132,6 +134,7 @@ pip install -r requirements-dev.txt
 export PYTHONPATH=src
 
 python -m monitor check --probe          # 設定と各サイトへの到達性を確認
+python -m monitor notify-test            # Slackにテスト通知を1件送る
 python -m monitor run --dry-run          # Slackに送らずログ出力だけ
 python -m monitor run --shop endclothing # 特定のショップだけ実行
 python -m monitor report                 # stateからグラフとダッシュボードを作り直す
@@ -166,11 +169,13 @@ python -m pytest tests/ -q               # テスト
 
 公式サイトの商品一覧はクライアント側で描画されるため、価格と在庫は**商品ページ**を見ないと分かりません。全商品は約2,000件あり毎時全件は現実的でないので、次の優先順位で `max_product_fetches` 件ずつ巡回します。
 
-1. **まだ一度も見ていない商品** = 新規入荷（sitemap は毎回全件読むので、**新規入荷の検知は常に即時**）
+1. まだ一度も見ていない商品
 2. `watchlist` に一致する商品
 3. 最終確認が古い順
 
-既定の150件だと全商品を一巡するのに約14時間かかります。狙っている商品がある場合は `watchlist` に入れると毎回チェックされます。
+**初回は一巡するまで通知が出ません。** 既定の150件だと全2,000商品を一巡するのに約14時間（14回の実行）かかります。この間は「stateに無い商品」が新規入荷なのか単に未巡回なのか区別できないため、誤通知を避けて記録だけ行います。Slackには進捗（`初回スキャン中です（450 / 2,067件・22%）`）が届き、一巡が終わると `初回スキャンが完了しました` に変わって、そこから差分通知が始まります。
+
+狙っている商品がある場合は `watchlist` に入れると毎回チェックされます。
 
 ```yaml
 watchlist:
