@@ -242,3 +242,45 @@ def test_currency_change_resets_price_history(store):
 
     history = store.data["products"]["shop:p1"]["price_history"]
     assert [h["price"] for h in history] == [16000.0]
+
+
+# ----------------------------------------------------------------------
+# 誤検知の防止（取得もれを完売と誤判定しない）
+# ----------------------------------------------------------------------
+def test_partial_harvest_does_not_mark_products_sold_out(store):
+    """取得数が大きく減った回は完売判定を見送る.
+
+    ページ送りの失敗で一部しか取れなかった回に完売扱いすると、次の回で
+    戻ってきた商品がまとめて「再入荷」として通知されてしまう。
+    """
+    products = [make_product(product_id=f"p{i}") for i in range(10)]
+    apply(store, products)
+    store.record_success("shop", 10, bootstrapped=True)
+
+    # 3件しか取れなかった回（前回の8割=8件を大きく下回る）
+    events = apply(store, products[:3], full_coverage=True)
+    assert events == []
+    assert all(store.data["products"][f"shop:p{i}"]["in_stock"] for i in range(10))
+
+    # 戻ってきても「再入荷」が大量発生しない
+    assert apply(store, products, full_coverage=True) == []
+
+
+def test_small_drop_still_marks_products_sold_out(store):
+    """通常の売り切れ（少数が一覧から消える）はこれまでどおり検知する."""
+    products = [make_product(product_id=f"p{i}") for i in range(10)]
+    apply(store, products)
+    store.record_success("shop", 10, bootstrapped=True)
+
+    apply(store, products[:9], full_coverage=True)   # 1件だけ消えた
+    assert store.data["products"]["shop:p9"]["in_stock"] is False
+    assert store.data["products"]["shop:p9"]["status"] == "gone"
+
+    events = apply(store, products, full_coverage=True)
+    assert [e.type for e in events] == [RESTOCK]
+
+
+def test_first_run_is_not_treated_as_a_partial_harvest(store):
+    """前回の記録が無い初回は、件数を比べる相手がいないので通常どおり扱う."""
+    events = apply(store, [make_product()], full_coverage=True)
+    assert [e.type for e in events] == [NEW_ARRIVAL]
