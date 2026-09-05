@@ -306,3 +306,42 @@ def test_bootstrap_run_does_not_claim_completion(store):
     store.record_success("shop", 10, bootstrapped=True, full_coverage=False)
     assert store.shop_meta("shop").get("bootstrap_complete") is None
     assert store.bootstrap_complete("shop", full_coverage=False) is False
+
+
+# ----------------------------------------------------------------------
+# 保存量の抑制（変化のない商品を毎回書き換えない）
+# ----------------------------------------------------------------------
+def test_unchanged_product_is_written_identically_on_full_coverage_shops(store):
+    """毎回全件取れるショップでは、変化のない商品の記録が1バイトも変わらない.
+
+    以前は最終確認時刻を毎回更新していたため、価格も在庫も動いていない商品まで
+    毎時コミットに現れ、リポジトリが無駄に膨らんでいた。
+    """
+    import json
+
+    apply(store, [make_product()], full_coverage=True)   # 初回（status: new）
+    apply(store, [make_product()], full_coverage=True)   # 2回目（status: in_stock に落ち着く）
+    before = json.dumps(store.data["products"]["shop:p1"], sort_keys=True)
+
+    apply(store, [make_product()], full_coverage=True)   # 3回目: 何も変わらないはず
+    after = json.dumps(store.data["products"]["shop:p1"], sort_keys=True)
+
+    assert before == after
+    assert "last_checked_at" not in store.data["products"]["shop:p1"]
+
+
+def test_partial_coverage_shops_keep_last_checked_at(store):
+    """一部しか巡回しないショップでは、巡回順を決めるために時刻が要る."""
+    apply(store, [make_product()], full_coverage=False)
+    entry = store.data["products"]["shop:p1"]
+    assert entry.get("last_checked_at")
+    assert store.last_checked_map("shop") == {"p1": entry["last_checked_at"]}
+
+
+def test_changed_product_still_updates(store):
+    """変化があった商品はこれまでどおり書き換わる."""
+    apply(store, [make_product(price=100.0)], full_coverage=True)
+    apply(store, [make_product(price=80.0)], full_coverage=True)
+    entry = store.data["products"]["shop:p1"]
+    assert entry["price"] == 80.0
+    assert len(entry["price_history"]) == 2

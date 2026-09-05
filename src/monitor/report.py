@@ -21,6 +21,12 @@ from .state import StateStore, parse_iso
 
 log = logging.getLogger(__name__)
 
+def _last_history_date(entry: dict[str, Any]) -> str:
+    """その商品の価格が最後に動いた日時。グラフを選ぶ優先度に使う."""
+    history = entry.get("price_history") or []
+    return str(history[-1].get("date", "")) if history else ""
+
+
 _plotting: tuple[Any, Any] | None = None
 
 
@@ -100,7 +106,7 @@ class ReportBuilder:
         # 上限に収まるよう「今回イベントが出た商品 → 最近確認した商品」の順に選ぶ。
         # 2段階に分けているのは、Python の sort が安定なのを利用して
         # 「イベント優先」を保ったまま「新しい順」を維持するため。
-        chartable.sort(key=lambda kv: kv[1].get("last_checked_at") or "", reverse=True)
+        chartable.sort(key=lambda kv: _last_history_date(kv[1]), reverse=True)
         chartable.sort(key=lambda kv: kv[0] not in priority_keys)
         selected = chartable[: self.config.max_charts]
 

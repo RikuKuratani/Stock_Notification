@@ -202,11 +202,18 @@ class StateStore:
         events: list[Event] = []
         seen_keys: set[str] = set()
 
+        # 商品ごとの「最終確認時刻」は、公式サイトのように毎回一部しか巡回できない
+        # ショップで巡回順を決めるためだけに要る。毎回全件取れるショップで持つと、
+        # 中身が何も変わっていない商品まで毎時書き換わり、リポジトリが無駄に膨らむ。
+        track_checked_at = not result.full_coverage
+
         for product in result.products:
             key = product.key
             seen_keys.add(key)
             prev = products.get(key)
-            entry, product_events = self._merge(product, prev, shop_name, stamp)
+            entry, product_events = self._merge(
+                product, prev, shop_name, stamp, track_checked_at
+            )
             products[key] = entry
             if not bootstrap:
                 events.extend(product_events)
@@ -221,7 +228,6 @@ class StateStore:
                     entry["in_stock"] = False
                     entry["sizes_in_stock"] = []
                     entry["status"] = "gone"
-                    entry["last_checked_at"] = stamp
                     entry["stock_signature"] = ""
 
         self.dirty = True
@@ -258,6 +264,7 @@ class StateStore:
         prev: dict[str, Any] | None,
         shop_name: str,
         stamp: str,
+        track_checked_at: bool = True,
     ) -> tuple[dict[str, Any], list[Event]]:
         events: list[Event] = []
         entry: dict[str, Any] = dict(prev or {})
@@ -274,9 +281,14 @@ class StateStore:
             in_stock=product.in_stock,
             stock_count=product.stock_count,
             image_url=product.image_url,
-            last_checked_at=stamp,
             stock_signature=product.stock_signature(),
         )
+        if track_checked_at:
+            entry["last_checked_at"] = stamp
+        else:
+            # 過去に記録したぶんは一度だけ消す。以降、変化のない商品は
+            # 書き出す内容が前回と1バイトも変わらず、差分に出てこなくなる。
+            entry.pop("last_checked_at", None)
         if product.extra:
             entry["extra"] = product.extra
 

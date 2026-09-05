@@ -1,0 +1,6 @@
+# state/ と docs/ は GitHub Actions が自動生成してコミットするファイル。
+# 人が書くものではないので、プルリクエストの差分では折りたたんで表示する。
+# （表示が変わるだけで、コンフリクトの起き方や中身には影響しない）
+state/state.json  linguist-generated=true
+docs/index.html   linguist-generated=true
+docs/charts/**    linguist-generated=true binary

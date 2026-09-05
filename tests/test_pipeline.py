@@ -307,10 +307,11 @@ def test_report_prefers_event_products_when_over_the_cap(tmp_path):
     for i in range(5):
         state.data["products"][f"shop:p{i}"] = {
             "shop_id": "shop", "product_id": f"p{i}", "product_name": f"Item {i}",
-            "currency": "EUR", "last_checked_at": f"2026-09-0{i + 1}T10:00:00+09:00",
+            "currency": "EUR",
             "price_history": [
                 {"date": "2026-08-01T09:00:00+09:00", "price": 100.0},
-                {"date": "2026-09-05T10:00:00+09:00", "price": 90.0},
+                # 価格が最後に動いた日時が新しいものほど優先してグラフ化する
+                {"date": f"2026-09-0{i + 1}T10:00:00+09:00", "price": 90.0},
             ],
         }
     config = ReportConfig(enabled=True, output_dir=str(tmp_path / "docs"), max_charts=2)
@@ -318,8 +319,8 @@ def test_report_prefers_event_products_when_over_the_cap(tmp_path):
 
     keys = [key for key, _ in charted]
     assert len(keys) == 2
-    assert keys[0] == "shop:p0"          # 最終確認は最も古いが、イベントがあるので優先
-    assert keys[1] == "shop:p4"          # 残りは最近確認した順
+    assert keys[0] == "shop:p0"          # 価格が動いたのは最も古いが、イベントがあるので優先
+    assert keys[1] == "shop:p4"          # 残りは価格が動いた順（新しいものから）
 
 
 # ----------------------------------------------------------------------
