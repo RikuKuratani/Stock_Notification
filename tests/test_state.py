@@ -284,3 +284,25 @@ def test_first_run_is_not_treated_as_a_partial_harvest(store):
     """前回の記録が無い初回は、件数を比べる相手がいないので通常どおり扱う."""
     events = apply(store, [make_product()], full_coverage=True)
     assert [e.type for e in events] == [NEW_ARRIVAL]
+
+
+def test_normal_run_records_bootstrap_complete_explicitly(store):
+    """一巡済みを明示的に記録し、取得もれの回に初回スキャン扱いへ戻さない.
+
+    Farfetch のようにページ送りが途切れると full_coverage が False になる。
+    その回だけ初回スキャン扱いに戻ると、本物の入荷通知が黙って消える。
+    """
+    store.shop_meta("shop").update(bootstrapped=True)
+    assert store.bootstrap_complete("shop", full_coverage=True) is True
+
+    store.record_success("shop", 10, bootstrapped=False, full_coverage=True)
+
+    # 次の回で全件取得できなくても、初回スキャン扱いには戻らない
+    assert store.bootstrap_complete("shop", full_coverage=False) is True
+
+
+def test_bootstrap_run_does_not_claim_completion(store):
+    """初回スキャン中の回では、完了フラグを立てない."""
+    store.record_success("shop", 10, bootstrapped=True, full_coverage=False)
+    assert store.shop_meta("shop").get("bootstrap_complete") is None
+    assert store.bootstrap_complete("shop", full_coverage=False) is False
