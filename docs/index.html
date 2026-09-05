@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Our Legacy 入荷監視ダッシュボード</title>
+<style>
+  :root { color-scheme: light dark; --ink:#1c1c1c; --muted:#6b6b6b; --line:#e5e5e5; --bg:#fbfaf8; --card:#fff; --accent:#c2410c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#ececec; --muted:#a0a0a0; --line:#333; --bg:#161514; --card:#1f1e1d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; letter-spacing:.02em; }
+  h2 { font-size:15px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:40px 0 12px; font-weight:600; }
+  .meta { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .stat b { display:block; font-size:26px; font-variant-numeric:tabular-nums; }
+  .stat span { color:var(--muted); font-size:12px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; font-size:13px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  tr:last-child td { border-bottom:0; }
+  td.ok { color:#166534; } td.bad { color:#b91c1c; font-weight:600; }
+  td.err { color:var(--muted); font-family:ui-monospace,monospace; font-size:11px; max-width:320px; }
+  a { color:inherit; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; border:1px solid var(--line); white-space:nowrap; }
+  .t-lowest_price { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .t-restock { border-color:var(--ink); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:16px; }
+  figure { margin:0; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  figure img { width:100%; display:block; }
+  figcaption { padding:10px 12px; font-size:13px; }
+  figcaption small { color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Our Legacy 入荷監視ダッシュボード</h1>
+  <p class="meta">最終更新 2026-09-05 08:25</p>
+
+  <div class="stats">
+    <div class="stat"><b>1182</b><span>追跡中の商品</span></div>
+    <div class="stat"><b>1094</b><span>在庫あり</span></div>
+    <div class="stat"><b>4</b><span>監視ショップ</span></div>
+    <div class="stat"><b>0</b><span>直近のイベント</span></div>
+  </div>
+
+  <h2>ショップの取得状況</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>ショップ</th><th>商品数</th><th>最終成功</th><th>状態</th><th>直近のエラー</th></tr></thead>
+    <tbody><tr><td>endclothing</td><td>140</td><td>2026-09-05T17:24:53+09:00</td><td class='ok'>正常</td><td class='err'></td></tr>
+<tr><td>farfetch</td><td>384</td><td>2026-09-05T17:25:38+09:00</td><td class='ok'>正常</td><td class='err'></td></tr>
+<tr><td>ourlegacy</td><td>150</td><td>2026-09-05T17:24:48+09:00</td><td class='ok'>正常</td><td class='err'></td></tr>
+<tr><td>ssense</td><td>508</td><td>2026-09-05T17:25:05+09:00</td><td class='ok'>正常</td><td class='err'></td></tr></tbody>
+  </table></div>
+
+  <h2>直近のイベント</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>日時</th><th>種別</th><th>ショップ</th><th>商品</th><th>価格</th></tr></thead>
+    <tbody><tr><td colspan='5'>まだイベントはありません</td></tr></tbody>
+  </table></div>
+
+  <h2>価格推移</h2>
+  <div class="grid"><p>価格が2回以上記録された商品が出ると、ここにグラフが並びます。</p></div>
+</div>
+</body>
+</html>
