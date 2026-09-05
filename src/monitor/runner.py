@@ -168,9 +168,12 @@ class Runner:
 
         overflow = len(sendable) - len(capped)
         if overflow > 0:
+            # 送らなかったぶんは次回に回らない。商品は state に取り込まれるので、
+            # 同じ「新規入荷」が再び立ち上がることはない。持ち越しではなく破棄。
             message = (
                 f"通知上限（{cfg.max_messages_per_run}件/回）に達したため、"
-                f"残り {overflow} 件は次回に持ち越します。"
+                f"残り {overflow} 件は送信を省略しました"
+                "（商品は記録済みなので、次回に再通知されることはありません）。"
             )
             summary.warnings.append(message)
             self.notifier.notify_run_summary(f":information_source: {message}")

@@ -164,6 +164,12 @@ class StateStore:
             product_count=product_count,
             bootstrapped=bootstrapped or meta.get("bootstrapped", False),
         )
+        if not bootstrapped:
+            # 通常モードで走り切ったなら一巡は確実に済んでいる。ここで明示的に
+            # 記録しておかないと、次に全件取得できなかった回（例: ページ送りが
+            # 429で途切れた Farfetch）に初回スキャン扱いへ逆戻りし、本物の
+            # 入荷通知を黙って捨ててしまう。
+            meta["bootstrap_complete"] = True
         self.dirty = True
 
     def record_failure(self, shop_id: str, message: str) -> dict[str, Any]:

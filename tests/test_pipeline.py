@@ -179,7 +179,8 @@ def test_runner_caps_messages_per_run(monkeypatch, tmp_path):
     assert summary.events_detected == 10
     event_messages = [p for p in notifier.payloads if "blocks" in p]
     assert len(event_messages) == 3
-    assert "持ち越します" in notifier.payloads[-1]["text"]
+    assert "送信を省略しました" in notifier.payloads[-1]["text"]
+    assert "7 件" in notifier.payloads[-1]["text"]
 
 
 def test_runner_prioritises_lowest_price_over_new_arrival(monkeypatch, tmp_path):
