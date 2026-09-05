@@ -1,13 +1,15 @@
 """JSON-LD（schema.org）ベースの汎用一覧スクレイパー.
 
-SSENSE / Farfetch / MR PORTER はいずれも素のHTTPリクエストでは 403 を返すため
-（2026-09-05 時点で実測）、本モジュールの実装は**実データで検証できていない**。
-仕様書フェーズ3のとおり、スクレイピング代行サービス（config.yml の
-``scraping.proxy``）か Playwright を挟んで到達できるようになった時点で
-`enabled: true` にして検証する前提のコードである。
+SSENSE と Farfetch は、``config.yml`` の ``impersonate`` でブラウザのTLS挙動を
+再現すると取得できる（2026-09-05 実測）。どちらもSEOのため商品一覧に
+``application/ld+json`` を出力しており、価格・在庫・商品URLが揃っている。
 
-これらのサイトはSEOのため商品一覧に ``application/ld+json`` の ItemList /
-Product を出力しているのが一般的なので、そこを共通の入口にしている。
+  - SSENSE  : ``@type: Product`` を1商品ずつ、1ページ120件
+  - Farfetch: ``@type: ItemList`` の中に Product、1ページ96件、価格はJPY
+
+MR PORTER だけは偽装しても JavaScript チャレンジのページが返るため未対応
+（仕様書フェーズ3）。
+
 サイトごとの差分（商品IDの取り方など）はサブクラスで吸収する。
 """
 
@@ -51,7 +53,12 @@ def iter_jsonld(html: str) -> Iterator[dict[str, Any]]:
 
 
 def iter_products(html: str) -> Iterator[dict[str, Any]]:
-    """JSON-LD から @type=Product のノードを取り出す."""
+    """JSON-LD から @type=Product のノードを取り出す.
+
+    SSENSE のように Product を直接並べるサイトと、Farfetch のように ItemList の
+    itemListElement に入れるサイトの両方に対応する（走査は再帰的なので、
+    ItemList の中の Product もそのまま拾える）。
+    """
     for node in iter_jsonld(html):
         types = node.get("@type")
         types = [types] if isinstance(types, str) else (types or [])
@@ -105,14 +112,41 @@ class JsonLdListingScraper(Scraper):
         if not listing_urls:
             raise RuntimeError("listing_urls が設定されていません")
         currency = str(self.options.get("currency", ""))
+        max_pages = int(self.options.get("max_pages", 5))
 
         found: dict[str, Product] = {}
         for url in listing_urls:
-            html = self.session.get_text(url)
-            for node in iter_products(html):
-                product = self.to_product(node, url, currency)
-                if product is not None:
-                    found[product.product_id] = product
+            # 総ページ数がHTMLに出ないため、新しい商品が出てこなくなるまで進む。
+            # ただし1ページ分の重複で止めると取りこぼす（同じページが返ってくる
+            # ことが実際にある）ので、2ページ連続で新規ゼロのときだけ打ち切る。
+            barren_pages = 0
+            for page in range(1, max_pages + 1):
+                page_url = url if page == 1 else self.page_url(url, page)
+                try:
+                    html = self.session.get_text(page_url)
+                except Exception as exc:  # noqa: BLE001 - 2ページ目以降の失敗は打ち切り
+                    if page == 1:
+                        raise
+                    self.warn(f"{page_url}: {page}ページ目の取得に失敗 ({exc})")
+                    break
+
+                before = len(found)
+                for node in iter_products(html):
+                    product = self.to_product(node, page_url, currency)
+                    if product is not None:
+                        found[product.product_id] = product
+                if len(found) == before:
+                    barren_pages += 1
+                    if barren_pages >= 2:
+                        break  # 2ページ続けて新規なし = 最終ページとみなす
+                else:
+                    barren_pages = 0
+            else:
+                # ループを最後まで使い切った = まだ先のページがあるかもしれない
+                self.warn(
+                    f"{url}: {max_pages}ページ分（{len(found)}件）で打ち切りました。"
+                    "取りこぼしが疑われる場合は max_pages を増やしてください"
+                )
 
         if not found:
             raise RuntimeError(
@@ -124,12 +158,13 @@ class JsonLdListingScraper(Scraper):
 
     # ------------------------------------------------------------------
     def to_product(self, node: dict[str, Any], listing_url: str, currency: str) -> Product | None:
-        url = str(node.get("url") or node.get("@id") or "").strip()
+        offer = offer_of(node)
+        # Farfetch は商品URLを offers の中にしか持たない
+        url = str(node.get("url") or node.get("@id") or offer.get("url") or "").strip()
         name = str(node.get("name") or "").strip()
         if not url or not name:
             return None
 
-        offer = offer_of(node)
         image = _first(node.get("image")) or ""
         if isinstance(image, dict):
             image = image.get("url", "")
@@ -151,8 +186,18 @@ class JsonLdListingScraper(Scraper):
             extra={"sku": str(node.get("sku") or node.get("mpn") or "")},
         )
 
+    @staticmethod
+    def page_url(url: str, page: int) -> str:
+        """一覧URLに ``?page=N`` を付ける（既存のクエリは保持する）."""
+        from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+        parts = urlparse(url)
+        query = [(k, v) for k, v in parse_qsl(parts.query) if k != "page"]
+        query.append(("page", str(page)))
+        return urlunparse(parts._replace(query=urlencode(query)))
+
     def product_id(self, node: dict[str, Any], url: str) -> str:
-        sku = str(node.get("sku") or node.get("productID") or "").strip()
+        sku = str(node.get("productID") or node.get("sku") or "").strip()
         return sku or url.rstrip("/").rsplit("/", 1)[-1]
 
     def sizes(self, node: dict[str, Any]) -> list[str]:

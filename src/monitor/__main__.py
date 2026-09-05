@@ -94,7 +94,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.probe:
         print("\n到達性チェック:")
         for shop in config.enabled_shops():
-            session = build_session(shop.id, config)
+            session = build_session(shop.id, config, str(shop.options.get("impersonate", "")),
+                                shop.options.get("min_interval_seconds"))
             urls = shop.options.get("listing_urls") or [shop.options.get("sitemap_index_url")]
             for url in [u for u in urls if u][:1]:
                 try:

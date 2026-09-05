@@ -318,3 +318,106 @@ def test_report_prefers_event_products_when_over_the_cap(tmp_path):
     assert len(keys) == 2
     assert keys[0] == "shop:p0"          # 最終確認は最も古いが、イベントがあるので優先
     assert keys[1] == "shop:p4"          # 残りは最近確認した順
+
+
+# ----------------------------------------------------------------------
+# HTTPクライアント: リトライとレート制限
+# ----------------------------------------------------------------------
+class FakeResponse:
+    def __init__(self, status_code, text="ok", headers=None):
+        self.status_code = status_code
+        self.text = text
+        self.content = text.encode()
+        self.headers = headers or {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import requests as rq
+            raise rq.HTTPError(f"HTTP {self.status_code}")
+
+
+class FakeHttpSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.headers = {}
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return self.responses.pop(0) if self.responses else FakeResponse(200)
+
+
+def test_http_retries_then_succeeds(monkeypatch):
+    from monitor.config import HttpConfig
+    from monitor.http import PoliteSession
+
+    slept = []
+    monkeypatch.setattr("monitor.http.time.sleep", lambda s: slept.append(s))
+    http = HttpConfig(min_interval_seconds=0, max_retries=3, respect_robots_txt=False,
+                      rate_limit_backoff_seconds=20.0)
+    session = PoliteSession("shop", http, session=FakeHttpSession([
+        FakeResponse(429), FakeResponse(503), FakeResponse(200, "done"),
+    ]))
+
+    assert session.get_text("https://x/y") == "done"
+    assert session.request_count == 3
+    # 429 は長め(20秒)、5xx は通常(4秒)のバックオフ
+    assert slept == [20.0, 4.0]
+
+
+def test_http_honours_retry_after_header(monkeypatch):
+    from monitor.config import HttpConfig
+    from monitor.http import PoliteSession
+
+    slept = []
+    monkeypatch.setattr("monitor.http.time.sleep", lambda s: slept.append(s))
+    http = HttpConfig(min_interval_seconds=0, max_retries=2, respect_robots_txt=False)
+    session = PoliteSession("shop", http, session=FakeHttpSession([
+        FakeResponse(429, headers={"Retry-After": "7"}), FakeResponse(200),
+    ]))
+
+    session.get("https://x/y")
+    assert slept == [7.0]   # 相手の指示に従う
+
+
+def test_http_gives_up_after_max_retries(monkeypatch):
+    import requests as rq
+
+    from monitor.config import HttpConfig
+    from monitor.http import PoliteSession
+
+    monkeypatch.setattr("monitor.http.time.sleep", lambda s: None)
+    http = HttpConfig(min_interval_seconds=0, max_retries=1, respect_robots_txt=False)
+    session = PoliteSession("shop", http, session=FakeHttpSession([FakeResponse(429)] * 5))
+
+    with pytest.raises(rq.HTTPError):
+        session.get("https://x/y")
+    assert session.request_count == 2   # 初回 + リトライ1回
+
+
+def test_http_does_not_retry_404(monkeypatch):
+    import requests as rq
+
+    from monitor.config import HttpConfig
+    from monitor.http import PoliteSession
+
+    monkeypatch.setattr("monitor.http.time.sleep", lambda s: None)
+    http = HttpConfig(min_interval_seconds=0, max_retries=3, respect_robots_txt=False)
+    session = PoliteSession("shop", http, session=FakeHttpSession([FakeResponse(404)]))
+
+    with pytest.raises(rq.HTTPError):
+        session.get("https://x/y")
+    assert session.request_count == 1
+
+
+def test_robots_txt_blocks_disallowed_url():
+    from monitor.config import HttpConfig
+    from monitor.http import BlockedByRobotsError, PoliteSession
+
+    robots = FakeResponse(200, "User-agent: *\nDisallow: /secret/\n")
+    http = HttpConfig(min_interval_seconds=0, respect_robots_txt=True)
+    session = PoliteSession("shop", http, session=FakeHttpSession([robots, FakeResponse(200)]))
+
+    with pytest.raises(BlockedByRobotsError):
+        session.get("https://x/secret/page")
+    assert session.allowed("https://x/public/page") is True

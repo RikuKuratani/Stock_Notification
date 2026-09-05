@@ -10,7 +10,10 @@ http:
   # 同一ショップへの連続リクエストの最小間隔（秒）
   min_interval_seconds: 1.5
   timeout_seconds: 30
-  max_retries: 2
+  max_retries: 3
+  # 429（レート制限）を受けたときの初回待機秒数。以降 40秒、80秒…と倍々に伸びる。
+  # Retry-After ヘッダが返ってきた場合はそちらを優先する。
+  rate_limit_backoff_seconds: 20
   # 実ブラウザに近いUAを名乗る（過度な偽装はしない / 仕様書 非機能要件1）
   user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
   # robots.txt を取得して Disallow のURLはスキップする（非機能要件2）
@@ -83,31 +86,44 @@ shops:
       price_field: "final_price_1"
       currency: "GBP"
 
-  # --- 未検証: 現状403。プロキシ経由 or Playwright が必要（フェーズ3） ---
-  # scraping.proxy を設定して enabled: true にすると有効になる。
+  # --- 検証済み: ブラウザ偽装（impersonate）が必要 -------------------
+  # これらは TLSフィンガープリントで Python/curl を弾くため、curl_cffi で
+  # ブラウザと同じ通信の作法を再現する。impersonate の値はサイトごとに
+  # 効くものが違うので、変更したら --dry-run で確認すること。
   - id: ssense
     name: "SSENSE"
     scraper: ssense
-    enabled: false
+    enabled: true
     options:
+      impersonate: "chrome"
       listing_urls:
         - "https://www.ssense.com/en-us/men/designers/our-legacy"
+      max_pages: 7          # 1ページ120件（全508件・実測）
       currency: "USD"
 
   - id: farfetch
     name: "Farfetch"
     scraper: farfetch
-    enabled: false
+    enabled: true
     options:
+      impersonate: "safari"   # chrome だとチャレンジページが返る
+      # レート制限(429)が厳しい。短時間に何度も叩くと数十分ブロックされるので、
+      # 間隔を長く・ページ数を控えめにしてある。増やすと取得件数は増えるが
+      # 429で失敗する回も増える（失敗しても次の実行で復帰する）。
+      min_interval_seconds: 8.0
       listing_urls:
         - "https://www.farfetch.com/shopping/men/our-legacy/items.aspx"
-      currency: "USD"
+      max_pages: 4          # 1ページ96件 = 最大384件
+      currency: "JPY"       # 日本からのアクセスは JPY 表示になる
 
+  # --- 未対応: 偽装しても JavaScript チャレンジが返る（フェーズ3） ---
+  # 代行サービス（scraping.proxy）か Playwright が必要。
   - id: mrporter
     name: "MR PORTER"
     scraper: mrporter
     enabled: false
     options:
+      impersonate: "safari17_2_ios"
       listing_urls:
         - "https://www.mrporter.com/en-us/mens/designer/our-legacy"
       currency: "USD"

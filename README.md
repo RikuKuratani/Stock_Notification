@@ -1,35 +1,54 @@
 # Our Legacy 入荷監視システム（MVP）
 
-ブランド「Our Legacy」の商品を公式サイトとセレクトショップで監視し、**新規入荷 / 再入荷（サイズ復活を含む）/ 過去最安値の更新**を Slack に通知します。
+ブランド「Our Legacy」の商品を公式サイトと3つのセレクトショップ（END. / SSENSE / Farfetch）で監視し、**新規入荷 / 再入荷（サイズ復活を含む）/ 過去最安値の更新**を Slack に通知します。
 GitHub Actions で1時間ごとに動き、状態は `state/state.json` に、価格推移グラフは GitHub Pages に出します。サーバーは不要です。
 
 仕様書: [`ourlegacy_monitor_spec.md`](ourlegacy_monitor_spec.md)
 
 ---
 
-## ⚠️ まず読んでください: MVP対象5サイトの到達性
+## MVP対象5サイトの到達性（実測）
 
 仕様書 3.2.1 が挙げた5サイトについて、実際にリクエストして確認した結果です（2026-09-05 時点）。
 
-| サイト | 結果 | 取得できるデータ | 既定 |
+| サイト | 状態 | 取得件数 | 取得できるデータ | 必要な対策 |
+|---|---|---|---|---|
+| Our Legacy 公式 | ✅ 稼働 | 全2,067件を巡回 | 価格・**サイズ別在庫**・SKU | なし |
+| END. Clothing | ✅ 稼働 | 140件（全件） | 価格・在庫数・画像 | なし |
+| SSENSE | ✅ 稼働 | 508件（全件） | 価格(USD)・在庫・画像 | ブラウザ偽装 |
+| Farfetch | ✅ 稼働 | 最大384件 | 価格(**JPY**)・在庫・画像 | ブラウザ偽装 + 低速化 |
+| MR PORTER | ❌ 未対応 | — | — | フェーズ3（下記） |
+
+### なぜ最初3サイトが403だったのか
+
+SSENSE / Farfetch / MR PORTER は、**TLSフィンガープリント**を見てアクセスを弾いていました。
+
+かみ砕くと、HTTPS通信を始めるときの「握手」の手順には、ソフトウェアごとに細かい癖があります。Chrome の癖、Safari の癖、Python の `requests` の癖はそれぞれ違い、サーバー側はこの癖を見るだけで「これはブラウザではなくプログラムだ」と判別できます。User-Agent（自己申告の名札）をブラウザに変えても、握手の癖は変わらないので見抜かれます。
+
+対策として [`curl_cffi`](https://github.com/lexiforest/curl_cffi) を使っています。これは**実ブラウザと同じ握手の仕方を再現する**ライブラリです。`config.yml` の `impersonate` に `chrome` や `safari` を指定すると、そのショップだけこの方式で通信します。
+
+```yaml
+- id: farfetch
+  options:
+    impersonate: "safari"        # chrome だとチャレンジページが返る
+    min_interval_seconds: 6.0    # 429が出やすいので間隔を長めに
+```
+
+サイトによって効くプロファイルが違うため（SSENSE は `chrome`、Farfetch は `safari`）、変更したら必ず `--dry-run` で確認してください。
+
+なお、これは「本来アクセスできないものをこじ開ける」のではなく、**ブラウザで普通に開けるページを、ブラウザと同じ作法で1時間に1回取得している**だけです。アクセス間隔の遠慮と `robots.txt` の遵守は偽装時も同じように効いています（両サイトとも該当ページは `robots.txt` で許可されていることを確認済み）。
+
+### MR PORTER が残っている理由
+
+MR PORTER は偽装しても、商品一覧の代わりに**2.6KBのJavaScriptチャレンジページ**が返ります。ブラウザ上でJavaScriptを実行して初めて本物のページが表示される仕組みで、HTTPリクエストだけでは突破できません。選択肢は次の3つです。
+
+| 方法 | 費用 | 難易度 | 備考 |
 |---|---|---|---|
-| Our Legacy 公式 | ✅ HTTP 200 | 価格・**サイズ別在庫**・入荷日・SKU | 有効 |
-| END. Clothing | ✅ HTTP 200 | 価格・在庫数・商品画像（全140件） | 有効 |
-| SSENSE | ❌ HTTP 403 | — | 無効 |
-| Farfetch | ❌ HTTP 403 | — | 無効 |
-| MR PORTER | ❌ HTTP 403 | — （`robots.txt` すら 403） | 無効 |
+| **Playwright**（本物のブラウザを動かす） | 無料 | 中 | GitHub Actions上でも動く。実行時間とメモリを食う。それでも弾かれる可能性あり |
+| **スクレイピング代行サービス**（ScraperAPI / ZenRows） | 月$0〜49 | 低 | 無料枠は月1,000〜5,000リクエスト程度。設定を書くだけで済む |
+| **自宅のMacで実行**（家庭用IPを使う） | 無料 | 中 | データセンターIPより通りやすい。Macを起動しておく必要がある |
 
-後者3サイトは仕様書が「比較的Bot対策が緩い」と見込んでいましたが、**通常回線からの素のHTTPリクエストで既にブロックされます**。GitHub Actions の IP からはさらに厳しくなる想定です。
-
-そのため本MVPでは:
-
-- **5サイトすべてのスクレイパーを実装済み**です
-- 検証できた2サイトを `enabled: true`、403の3サイトを `enabled: false` にしてあります
-- 403の3サイトは、スクレイピング代行サービス（ScraperAPI / ZenRows 等）を挟めば**設定変更だけで有効化**できる作りです（→ [Bot対策サイトの有効化](#bot対策サイトの有効化)）
-
-有効な2サイトだけでも、公式の新規入荷とサイズ別再入荷、END. の全140商品の価格・在庫は追えます。
-
----
+初級者の方には**代行サービスの無料枠**が最も手軽です。MR PORTERだけなら1時間1回×24時間×30日＝月720リクエストで、無料枠に収まります。手順は [Bot対策サイトの有効化](#bot対策サイトの有効化) を参照してください。
 
 ## セットアップ
 
@@ -44,14 +63,26 @@ GitHub Actions で1時間ごとに動き、状態は `state/state.json` に、�
 ### 2. GitHub リポジトリの作成
 
 ```bash
-cd "$(dirname "$0")"          # このディレクトリ
 git init
 git add .
 git commit -m "feat: Our Legacy 入荷監視システム MVP"
 gh repo create ourlegacy-monitor --private --source=. --push
 ```
 
-> **公開/非公開について**: GitHub Actions は**パブリックリポジトリなら実行時間が無料無制限**、プライベートだと無料枠は月2,000分です。本システムは1回あたり約5分なので、毎時実行すると月約3,600分となり**プライベートでは無料枠を超えます**。プライベートで運用する場合は `config.yml` の `max_product_fetches` を下げるか、cron を2〜3時間ごとにしてください。
+> **⚠️ 実行時間の無料枠について**（プライベートリポジトリの場合は必読）
+>
+> GitHub Actions は**パブリックリポジトリなら無料無制限**ですが、**プライベートは月2,000分**までです。
+> 4ショップ全部を回すと1回あたり **8〜13分**（Farfetchのレート制限待ちが大半）かかるため、
+> 毎時実行すると月6,000〜9,000分となり、**プライベートでは大幅に超過します**（超過分は従量課金）。
+>
+> 対処は次のいずれかです。おすすめは上から順:
+>
+> | 方法 | 月あたり | 手順 |
+> |---|---|---|
+> | **リポジトリをパブリックにする** | 無料無制限 | *Settings > General > Change visibility*。Webhook URLはSecretsにあるので公開されません。公開されるのは監視対象の商品リストとグラフだけです |
+> | **実行を3時間ごとにする** | 約2,000〜3,000分 | `.github/workflows/monitor.yml` の cron を `'0 */3 * * *'` に変更 |
+> | **重いショップだけ間引く** | 約1,500分 | Farfetchの `max_pages` を `3` に下げる、または `enabled: false` にする |
+> | **自分のMacで動かす** | 無料 | Actionsを使わず `launchd` / `cron` でローカル実行（Macの起動が必要） |
 
 ### 3. シークレットの登録
 
@@ -75,6 +106,23 @@ gh repo create ourlegacy-monitor --private --source=. --push
 *Actions > 入荷監視 > Run workflow* から手動実行します。初回はそのショップの全商品を「既知」として登録するだけで、個別通知は飛ばしません（サマリのみ）。**差分通知は2回目以降**から始まります。
 
 ---
+
+## 稼働を始めたあとの進め方
+
+| 時期 | やること | 見るところ |
+|---|---|---|
+| 初回実行の直後 | Slackに「初回スキャンが完了しました」が4件（4ショップ分）届くのを確認 | Slackチャンネル |
+| 1〜2時間後 | 2回目以降で差分通知が動き出す。Actionsが緑になっているか確認 | *Actions* タブ |
+| 翌日 | ダッシュボードに各ショップの「最終成功」が並ぶか確認 | GitHub Pages |
+| 1週間後 | 通知が多すぎ/少なすぎないか調整（`cooldown_hours`、`max_messages_per_run`） | `config.yml` |
+| 随時 | 欲しい商品が決まったら公式サイトの `watchlist` に追加 | `config.yml` |
+
+うまくいかないときの見方:
+
+- **Slackに何も来ない** → *Actions* タブでワークフローが緑か確認。赤ならログの「取得に失敗」を読む。緑なのに来ないなら `SLACK_WEBHOOK_URL` の登録名を確認する
+- **特定のショップだけ失敗し続ける** → ダッシュボードの「連続失敗」欄を見る。サイト改修で構造が変わったか、`impersonate` のプロファイルが効かなくなった可能性
+- **通知が多すぎる** → `notify.cooldown_hours` を伸ばす、`notify.events` で種別を絞る
+- **グラフが出ない** → 価格が2回以上記録されるまでグラフは作られません（変化がなければ記録もされません）。数日待つ
 
 ## ローカルでの実行
 
@@ -106,7 +154,11 @@ python -m pytest tests/ -q               # テスト
 | `notify.max_messages_per_run` | `30` | 1回の実行で送るメッセージの上限（暴発防止） |
 | `notify.events` | 全て `true` | 通知する種別を個別にON/OFF |
 | `report.base_url` | 空 | GitHub Pages の公開URL |
+| `http.rate_limit_backoff_seconds` | `20` | 429を受けたときの初回待機秒数（以降は倍々） |
 | `shops[].enabled` | — | ショップごとのON/OFF |
+| `shops[].options.impersonate` | — | ブラウザ偽装のプロファイル（`chrome` / `safari` など） |
+| `shops[].options.min_interval_seconds` | — | そのショップだけアクセス間隔を変える |
+| `shops[].options.max_pages` | — | 一覧ページを何ページまで辿るか |
 | `shops[].options.max_product_fetches` | `150` | 公式サイトで1回に見る商品ページ数（後述） |
 | `shops[].options.watchlist` | `[]` | 公式サイトで優先的に毎回チェックする商品（部分一致） |
 
@@ -128,23 +180,30 @@ watchlist:
 
 ### Bot対策サイトの有効化
 
-SSENSE / Farfetch / MR PORTER を動かすには、代行サービスを挟みます。
+#### SSENSE / Farfetch（設定済み・追加作業なし）
 
-1. ScraperAPI か ZenRows でAPIキーを取得し、`SCRAPER_PROXY_API_KEY` に登録
-2. `config.yml` を編集:
+`impersonate` の指定だけで動きます。プロファイルが効かなくなったら `config.yml` の値を
+`chrome` / `safari` / `chrome131` / `safari18_0` などに変えて `--dry-run` で試してください。
+
+#### MR PORTER（代行サービスが必要）
+
+1. [ScraperAPI](https://www.scraperapi.com/) か [ZenRows](https://www.zenrows.com/) で無料アカウントを作り、APIキーを取得する
+2. リポジトリの *Settings > Secrets and variables > Actions* に `SCRAPER_PROXY_API_KEY` として登録する
+3. `config.yml` を編集する:
    ```yaml
    scraping:
      proxy:
        enabled: true
        url_template: "https://api.scraperapi.com/?api_key={key}&url={url}&render=true"
-       shops: [ssense, farfetch, mrporter]
+       shops: [mrporter]
    ```
-3. 対象ショップの `enabled` を `true` にする
-4. `python -m monitor run --dry-run --shop ssense` で確認
+   （ZenRows の場合: `"https://api.zenrows.com/v1/?apikey={key}&url={url}&js_render=true"`）
+4. `mrporter` の `enabled` を `true` に変える
+5. `python -m monitor run --dry-run --shop mrporter` で商品が取れるか確認する
 
-この3サイトのパース処理は JSON-LD（schema.org）を読む汎用実装で、**実データでの検証は未了**です。到達できるようになった時点で、実際のHTMLに合わせて `src/monitor/scrapers/blocked_sites.py` を調整してください。
+`render=true` / `js_render=true` は「代行サービス側でブラウザを起動してJavaScriptを実行してから返す」オプションで、MR PORTERにはこれが必須です。1リクエストあたりの消費が大きいプランが多いので、無料枠の残量に注意してください。
 
----
+商品が取れたら `src/monitor/scrapers/blocked_sites.py` の `MrPorterScraper` を実データに合わせて調整します（現状はJSON-LDを読む汎用実装のままで、**MR PORTERの実データでは未検証**です）。
 
 ## 仕組み
 
@@ -191,10 +250,11 @@ GitHub Actions (毎時)
 
 ## 既知の制約
 
-- **公式サイトは全商品を毎時は見られません**。新規入荷は即時ですが、既存商品の値下げ・再入荷の検知には最大14時間かかります（`max_product_fetches` で調整可能）。
-- **END. はサイズ別の在庫が取れません**。一覧APIが総在庫数しか返さないため、「在庫あり/なし」と在庫数での判定になります。サイズ単位で追うには商品ページの取得が別途必要です。
-- **公式サイトの価格は EUR 表示**です。`robots.txt` が `/jp-ja` `/jp-en` `/global-en` を禁止しているため、地域別の価格は取得していません。
-- **SSENSE / Farfetch / MR PORTER は未検証**です（上記）。
+- **公式サイトは全商品を毎時は見られません**。約2,000商品あり、1回150件ずつ巡回します。新規入荷は sitemap を毎回全件読むので即時ですが、既存商品の値下げ・再入荷の検知には最大14時間かかります（`max_product_fetches` で調整可能）。
+- **END. と SSENSE / Farfetch はサイズ別の在庫が取れません**。一覧ページが総在庫しか返さないためで、「在庫あり/なし」単位の判定になります。サイズ単位で追えるのは公式サイトのみです。
+- **通貨がショップごとに違います**（公式=EUR、END.=GBP、SSENSE=USD、Farfetch=JPY）。過去最安値の比較は同一ショップ内でのみ行うので実害はありませんが、ショップ間の価格比較はできません。
+- **Farfetch はレート制限（429）が厳しい**です。8秒間隔・最大4ページ（384件）に抑え、429を受けたら20秒→40秒→80秒と待ちます。それでも失敗する回はあり、失敗はSlackに通知されて次の実行で自動復帰します。短時間に何度も手動実行すると数十分ブロックされるので注意してください。
+- **MR PORTER は未対応**です（上記）。
 - GitHub Actions の cron は指定時刻から数分〜十数分ずれることがあります。
 
 ## スコープ外

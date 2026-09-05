@@ -83,7 +83,8 @@ class Runner:
     # ------------------------------------------------------------------
     def _run_shop(self, shop: ShopConfig, summary: RunSummary) -> list[Event]:
         started = time.monotonic()
-        session = build_session(shop.id, self.config)
+        session = build_session(shop.id, self.config, str(shop.options.get("impersonate", "")),
+                                shop.options.get("min_interval_seconds"))
         bootstrap = not self.state.has_products(shop.id)
 
         log.info("[%s] 開始%s", shop.id, "（初回スキャン）" if bootstrap else "")

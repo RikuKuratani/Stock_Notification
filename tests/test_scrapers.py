@@ -180,3 +180,84 @@ def test_jsonld_scraper_raises_when_blocked():
     scraper = FarfetchScraper(shop, FakeSession({"https://ff/x": "<html>403</html>"}))
     with pytest.raises(RuntimeError, match="Bot対策"):
         scraper.fetch_products()
+
+
+def test_jsonld_scraper_paginates_and_stops_when_exhausted():
+    """新しい商品が出てこなくなったらページ送りを止める."""
+    from monitor.scrapers.blocked_sites import SsenseScraper
+
+    page1 = JSONLD_HTML
+    page2 = JSONLD_HTML.replace("12345678", "11111111").replace("87654321", "22222222")
+    session = FakeSession({
+        "https://s/x": page1,
+        "https://s/x?page=2": page2,
+        "https://s/x?page=3": page2,  # 重複（1回だけなら続行する）
+        "https://s/x?page=4": page2,  # 2回連続で新規なし = ここで打ち切る
+        "https://s/x?page=5": page1,
+    })
+    shop = ShopConfig(id="ssense", name="SSENSE", scraper="ssense",
+                      options={"listing_urls": ["https://s/x"], "max_pages": 5})
+    products = SsenseScraper(shop, session).fetch_products()
+
+    assert len(session.requested) == 4          # 4ページ目で打ち切る
+    assert len(products) == 4
+
+
+def test_jsonld_scraper_tolerates_one_duplicate_page():
+    """1ページ分の重複で止めると取りこぼすため、2ページ連続まで許容する."""
+    from monitor.scrapers.blocked_sites import SsenseScraper
+
+    page1 = JSONLD_HTML
+    page3 = JSONLD_HTML.replace("12345678", "33333333").replace("87654321", "44444444")
+    session = FakeSession({
+        "https://s/x": page1,
+        "https://s/x?page=2": page1,   # 同じページが返ってきた
+        "https://s/x?page=3": page3,   # その先にまだ商品がある
+        "https://s/x?page=4": page3,
+        "https://s/x?page=5": page3,
+    })
+    shop = ShopConfig(id="ssense", name="SSENSE", scraper="ssense",
+                      options={"listing_urls": ["https://s/x"], "max_pages": 5})
+    products = SsenseScraper(shop, session).fetch_products()
+
+    assert {p.product_id for p in products} == {"12345678", "87654321", "33333333", "44444444"}
+
+
+def test_jsonld_scraper_warns_when_page_budget_is_used_up():
+    from monitor.scrapers.blocked_sites import SsenseScraper
+
+    pages = {"https://s/x": JSONLD_HTML}
+    for n in (2, 3):
+        pages[f"https://s/x?page={n}"] = JSONLD_HTML.replace("1234", f"{n}999").replace("8765", f"{n}888")
+    shop = ShopConfig(id="ssense", name="SSENSE", scraper="ssense",
+                      options={"listing_urls": ["https://s/x"], "max_pages": 3})
+    scraper = SsenseScraper(shop, FakeSession(pages))
+    scraper.fetch_products()
+    assert any("打ち切りました" in w for w in scraper.warnings)
+
+
+def test_farfetch_reads_url_from_offers():
+    """Farfetch は商品URLを offers の中にしか持たない."""
+    from monitor.scrapers.blocked_sites import FarfetchScraper
+
+    html = """<script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"ItemList","numberOfItems":1,"itemListElement":[
+     {"@type":"Product","position":"1","name":"\\u30ec\\u30b6\\u30fc\\u30d6\\u30fc\\u30c4",
+      "image":["https://cdn/x.jpg"],"brand":{"@type":"Brand","name":"OUR LEGACY"},
+      "offers":{"@type":"Offer","price":75800,"priceCurrency":"JPY",
+       "url":"/jp/shopping/men/our-legacy-boots-item-31083391.aspx",
+       "availability":"https://schema.org/InStock"}}]}
+    </script>"""
+    shop = ShopConfig(id="farfetch", name="Farfetch", scraper="farfetch",
+                      options={"listing_urls": ["https://www.farfetch.com/shopping/men/our-legacy/items.aspx"]})
+    products = FarfetchScraper(shop, FakeSession({
+        "https://www.farfetch.com/shopping/men/our-legacy/items.aspx": html,
+    })).fetch_products()
+
+    assert len(products) == 1
+    product = products[0]
+    assert product.product_id == "31083391"
+    assert product.price == 75800.0 and product.currency == "JPY"
+    assert product.in_stock is True
+    # 相対URLは一覧URLを基準に絶対化する
+    assert product.product_url == "https://www.farfetch.com/jp/shopping/men/our-legacy-boots-item-31083391.aspx"

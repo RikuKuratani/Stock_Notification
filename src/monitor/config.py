@@ -20,6 +20,8 @@ class HttpConfig:
         "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     )
     respect_robots_txt: bool = True
+    #: 429（レート制限）を受けたときの初回待機秒数。以降は倍々に伸びる。
+    rate_limit_backoff_seconds: float = 20.0
 
 
 @dataclass
