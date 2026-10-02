@@ -153,6 +153,7 @@ python -m pytest tests/ -q               # テスト
 |---|---|---|
 | `http.min_interval_seconds` | `1.5` | 同一ショップへの連続アクセスの最小間隔（秒） |
 | `http.respect_robots_txt` | `true` | `robots.txt` が禁止しているURLは取得しない |
+| `notify.enabled` | `true` | 通知全体の一時停止用フラグ（`false` で Slack 通知を止める） |
 | `notify.cooldown_hours` | `24` | 同じ商品・同じ種別を再通知しない時間 |
 | `notify.max_messages_per_run` | `30` | 1回の実行で送るメッセージの上限（暴発防止） |
 | `notify.events` | 全て `true` | 通知する種別を個別にON/OFF |

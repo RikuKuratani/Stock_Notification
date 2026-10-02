@@ -201,6 +201,21 @@ def test_runner_prioritises_lowest_price_over_new_arrival(monkeypatch, tmp_path)
     assert "過去最安値" in json.dumps(sent[0], ensure_ascii=False)
 
 
+def test_runner_skips_all_notifications_when_disabled(monkeypatch, tmp_path):
+    runner, state, notifier = build_runner(
+        monkeypatch, tmp_path,
+        StubScraper([make_product(product_id="p1"), make_product(product_id="p2")]),
+        notify_config=NotifyConfig(enabled=False, bootstrap_summary_only=False),
+    )
+    state.shop_meta("shop")["bootstrap_complete"] = True
+
+    summary = runner.run()
+
+    assert summary.notifications_sent == 0
+    assert notifier.sent == 0
+    assert notifier.payloads == []
+
+
 # ----------------------------------------------------------------------
 # レポート
 # ----------------------------------------------------------------------
