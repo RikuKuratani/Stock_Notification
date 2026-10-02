@@ -74,7 +74,7 @@ class Runner:
         self.state.log_events(notified)
         builder.write_dashboard(charted)
 
-        if summary.failures:
+        if self.config.notify.enabled and summary.failures:
             self.notifier.notify_failures(summary.failures)
 
         summary.notifications_sent = self.notifier.sent
@@ -135,7 +135,11 @@ class Runner:
             time.monotonic() - started,
         )
 
-        if bootstrap and self.config.notify.bootstrap_summary_only:
+        if (
+            self.config.notify.enabled
+            and bootstrap
+            and self.config.notify.bootstrap_summary_only
+        ):
             self.notifier.notify_bootstrap(
                 shop.name,
                 registered=known,
@@ -150,6 +154,8 @@ class Runner:
     ) -> list[Event]:
         """クールダウンと上限を適用して Slack に送る（仕様書 4.4）."""
         cfg = self.config.notify
+        if not cfg.enabled:
+            return []
         sendable = [
             event
             for event in events

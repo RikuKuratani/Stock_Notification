@@ -26,6 +26,7 @@ class HttpConfig:
 
 @dataclass
 class NotifyConfig:
+    enabled: bool = True
     cooldown_hours: float = 24.0
     max_messages_per_run: int = 30
     bootstrap_summary_only: bool = True
@@ -38,7 +39,7 @@ class NotifyConfig:
     )
 
     def wants(self, event_type: str) -> bool:
-        return bool(self.events.get(event_type, True))
+        return self.enabled and bool(self.events.get(event_type, True))
 
 
 @dataclass
